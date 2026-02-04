@@ -84,7 +84,7 @@ public class DefaultEmailSenderProvider implements EmailSenderProvider {
 
         Session session = Session.getInstance(buildEmailProperties(config, from));
 
-        Message message = buildMessage(session, convertedAddress, from, subject, config, buildMultipartBody(textBody, htmlBody));
+        Message message = buildMessage(session, convertedAddress, from, subject, config, buildMultipartBody(config, textBody, htmlBody));
 
         try(Transport transport = session.getTransport("smtp")) {
 
@@ -195,20 +195,42 @@ public class DefaultEmailSenderProvider implements EmailSenderProvider {
         }
     }
 
-    private Multipart buildMultipartBody(String textBody, String htmlBody) throws EmailException {
+    private Multipart buildMultipartBody(Map<String, String> config, String textBody, String htmlBody) throws EmailException {
         Multipart multipart = new MimeMultipart("alternative");
+        String emailFormat = config.getOrDefault(CONFIG_EMAIL_FORMAT, EMAIL_FORMAT_MULTIPART);
 
         try {
-            if (textBody != null) {
-                MimeBodyPart textPart = new MimeBodyPart();
-                textPart.setText(textBody, "UTF-8");
-                multipart.addBodyPart(textPart);
-            }
-
-            if (htmlBody != null) {
-                MimeBodyPart htmlPart = new MimeBodyPart();
-                htmlPart.setContent(htmlBody, "text/html; charset=UTF-8");
-                multipart.addBodyPart(htmlPart);
+            switch (emailFormat) {
+                case EMAIL_FORMAT_TEXT:
+                    // テキストのみ送信
+                    if (textBody != null) {
+                        MimeBodyPart textPart = new MimeBodyPart();
+                        textPart.setText(textBody, "UTF-8");
+                        multipart.addBodyPart(textPart);
+                    }
+                    break;
+                case EMAIL_FORMAT_HTML:
+                    // HTMLのみ送信
+                    if (htmlBody != null) {
+                        MimeBodyPart htmlPart = new MimeBodyPart();
+                        htmlPart.setContent(htmlBody, "text/html; charset=UTF-8");
+                        multipart.addBodyPart(htmlPart);
+                    }
+                    break;
+                case EMAIL_FORMAT_MULTIPART:
+                default:
+                    // マルチパート送信（テキスト+HTML）
+                    if (textBody != null) {
+                        MimeBodyPart textPart = new MimeBodyPart();
+                        textPart.setText(textBody, "UTF-8");
+                        multipart.addBodyPart(textPart);
+                    }
+                    if (htmlBody != null) {
+                        MimeBodyPart htmlPart = new MimeBodyPart();
+                        htmlPart.setContent(htmlBody, "text/html; charset=UTF-8");
+                        multipart.addBodyPart(htmlPart);
+                    }
+                    break;
             }
         } catch (MessagingException e) {
             throw new EmailException("Error encoding email body parts", e);

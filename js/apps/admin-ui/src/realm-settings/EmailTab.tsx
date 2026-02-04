@@ -336,6 +336,47 @@ export const RealmSettingsEmailTab = ({
               defaultValue={10000}
               min={0}
             />
+            <FormGroup label={t("emailFormat")} fieldId="emailFormat">
+              <Controller
+                name="smtpServer.emailFormat"
+                control={control}
+                defaultValue="multipart"
+                render={({ field }) => (
+                  <>
+                    <Radio
+                      id="emailFormatMultipart"
+                      name="smtpServer.emailFormat"
+                      data-testid="smtpServer.emailFormat.multipart"
+                      label={t("emailFormatMultipart")}
+                      description={t("emailFormatMultipartHelp")}
+                      value="multipart"
+                      isChecked={field.value === "multipart"}
+                      onChange={() => field.onChange("multipart")}
+                    />
+                    <Radio
+                      id="emailFormatText"
+                      name="smtpServer.emailFormat"
+                      data-testid="smtpServer.emailFormat.text"
+                      label={t("emailFormatText")}
+                      description={t("emailFormatTextHelp")}
+                      value="text"
+                      isChecked={field.value === "text"}
+                      onChange={() => field.onChange("text")}
+                    />
+                    <Radio
+                      id="emailFormatHtml"
+                      name="smtpServer.emailFormat"
+                      data-testid="smtpServer.emailFormat.html"
+                      label={t("emailFormatHTML")}
+                      description={t("emailFormatHTMLHelp")}
+                      value="html"
+                      isChecked={field.value === "html"}
+                      onChange={() => field.onChange("html")}
+                    />
+                  </>
+                )}
+              />
+            </FormGroup>
             <Controller
               name="smtpServer.debug"
               control={control}

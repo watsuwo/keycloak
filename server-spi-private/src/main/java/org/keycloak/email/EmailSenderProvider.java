@@ -28,6 +28,10 @@ import org.keycloak.provider.Provider;
 public interface EmailSenderProvider extends Provider {
 
     String CONFIG_ALLOW_UTF8 = "allowutf8";
+    String CONFIG_EMAIL_FORMAT = "emailFormat";
+    String EMAIL_FORMAT_MULTIPART = "multipart";
+    String EMAIL_FORMAT_TEXT = "text";
+    String EMAIL_FORMAT_HTML = "html";
 
     default void send(Map<String, String> config, UserModel user, String subject, String textBody, String htmlBody) throws EmailException {
         send(config, user.getEmail(), subject, textBody, htmlBody);
