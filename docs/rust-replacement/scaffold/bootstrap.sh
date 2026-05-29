@@ -331,4 +331,98 @@ cat > LICENSE <<'EOF'
 EOF
 fi
 
+# ---------------------------------------------------------------------------
+# HANDOFF.md — 別セッション/開発者への引き継ぎ
+# ---------------------------------------------------------------------------
+say "docs/HANDOFF.md"
+cat > docs/HANDOFF.md <<'EOF'
+# 開発引き継ぎ (HANDOFF)
+
+このリポジトリ `sso` は、Keycloak の課題を解消する **Rust 製 SSO / IdP** の新規実装である。
+本ドキュメントだけ読めば開発を継続できるよう、文脈・決定・現状・次の一手をまとめる。
+
+> 設計の根拠は [`docs/ADR-0001-rust-replacement-strategy.md`](./ADR-0001-rust-replacement-strategy.md) を参照（必読）。
+
+## 1. なぜ作るか（Keycloak の課題）
+
+1. 拡張性は高いが開発難易度が高い（Java provider + JAR デプロイが重い）
+2. 設定をソース管理できない（GitOps/IaC と相性が悪い）
+3. Java/JVM 依存をやめたい
+4. Infinispan（組み込みデータグリッド + JGroups）の運用負荷が高い
+
+## 2. 確定している方針（ADR-0001 / Proposed）
+
+- 言語: **Rust**
+- アーキテクチャ: **ステートレスなアプリノード + 外部ストア（PostgreSQL + Redis/Valkey）**。
+  **Infinispan / 組み込みデータグリッド / JGroups は不採用。** アクセストークンは署名のみのステートレス JWT。
+- 設定: **宣言的（GitOps/IaC）をコアの第一級市民に**。`idp apply -f realm.yaml` + K8s Operator/CRD。真実の源は Git。
+- 拡張: **コア再コンパイル不要**の3層 → Rhai（軽量スクリプト）/ WASM（wasmtime/extism）/ Webhook。
+- スコープ: フル（OIDC/OAuth2 + SAML + 外部IdP連携/LDAP + MFA/Passkey/FAPI）。ただし段階導入。
+- 進め方: **Strangler Fig**（Keycloak と並走し段階移行。ビッグバン置換はしない）。
+
+## 3. 最大リスク（必ず意識すること）
+
+- 🔴 **SAML 2.0 IdP（XML-DSig / C14N / XML暗号）を純 Rust で安全に実装するのは困難。**
+  署名ラッピング等の事故源。現実解は `libxmlsec`(C) への FFI か別コンポーネント分離。**Phase 0 で実現性を検証**し、
+  ダメなら後送り。プロトコル/暗号は自作せず検証済みライブラリを使う。
+- OIDC/OAuth2 プロバイダ本体は Go の `fosite` 相当が Rust に無く、**自前実装が主**（最大の作り込み）。
+
+## 4. 現状（このコミット時点）
+
+- Cargo workspace の雛形が存在し、`cargo build` / `test` / `clippy -D warnings` / `fmt --check` が**全て通る**。
+- 機能 crate（idp-oidc 等）は **スケルトン**（smoke テストのみ）。`idp-server` は `/healthz`・`/livez` のみ稼働。
+- まだ実装されていない: 認証フロー、トークン発行、永続化、設定 reconcile、拡張ホスト、各プロトコル。
+
+## 5. 開発コマンド
+
+```bash
+cargo build --all
+cargo test --all
+cargo run -p idp-server   # http://0.0.0.0:8080/healthz
+cargo fmt --all && cargo clippy --all-targets --all-features -- -D warnings
+```
+
+## 6. クレート構成とフェーズ対応
+
+| crate | 役割 | Phase |
+|---|---|---|
+| `idp-server` (bin) | axum HTTP サーバ本体 | 1 |
+| `idp-core` | ドメインモデル・共通型 | 1 |
+| `idp-config` | 宣言的設定の reconcile (IaC) | 1 |
+| `idp-store` | 永続化(Postgres/sqlx) + 揮発(Redis) | 1 |
+| `idp-session` | ステートレスセッション / JWT(josekit) | 1 |
+| `idp-oidc` | OIDC / OAuth2 プロバイダ | 1 |
+| `idp-mfa` | WebAuthn/Passkey(webauthn-rs)・TOTP | 1 |
+| `idp-ext` | 拡張ホスト (Rhai/WASM/Webhook) | 1 |
+| `idp-federation` | 外部IdP連携 / LDAP(ldap3) | 2 |
+| `idp-saml` | SAML 2.0 IdP（XML-DSig 要スパイク） | 3 |
+| `idp-cli` (bin) | `idp apply` CLI | 1 |
+
+## 7. 推奨ライブラリ（ADR-0001 §6 の評価より）
+
+axum / tokio / sqlx / rustls / RustCrypto / **josekit**(JOSE) / **webauthn-rs** / totp-rs /
+**ldap3** / oauth2(クライアント用) / wasmtime|extism / rhai。
+
+## 8. 次の一手（ロードマップ）
+
+- **Phase 0 — リスクスパイク（最優先）**
+  1. SAML XML-DSig を Rust(FFI 含む)で安全に検証/署名できるか
+  2. WASM プラグインホスト(extism)でトークンマッパーが書けるか
+  3. ステートレス + Redis/Postgres セッションの性能
+- **Phase 1 — OIDC/OAuth2 コア + 設定 IaC + Passkey**（最も価値が高く達成可能）
+- **Phase 2 — 外部IdP連携 + LDAP federation**
+- **Phase 3 — SAML IdP / FAPI / CIBA / Token Exchange / 認可サービス**
+- 全期間: PBKDF2 パスワードハッシュ互換など Keycloak からの移行互換を設計に織り込む
+
+## 9. 着手するなら（提案する最初のタスク）
+
+Phase 1 を選ぶ場合の最初の縦切り（vertical slice）:
+1. `idp-core` に Realm/Client/User の最小モデルを定義
+2. `idp-store` に Postgres スキーマ + sqlx マイグレーション
+3. `idp-oidc` に Discovery(`/.well-known/openid-configuration`) と JWKS エンドポイント
+4. `idp-oidc` に authorization code フロー（最小）+ `idp-session` で JWT 発行(josekit)
+5. `idp-config` で realm/client を YAML から reconcile
+各ステップでテストを追加し、CI を緑に保つこと。
+EOF
+
 say "done. next: cargo build && cargo test --all"
